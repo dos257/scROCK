@@ -59,11 +59,11 @@ def train_dnn(
     optimizer='nadam', optimizer_lr = 0.0001,
     n_epochs=100, n_batches=None,
     batch_size=32, batch_replace=False,
-    verbose=False, on_each_batch=None, seed=0
+    verbose=False, plots=False, on_each_batch=None, seed=0
 ):
     '''
     Trains DNN on dataset
-    @param net: torch.Module, DNN to train
+    @param net: torch.nn.Module, DNN to train
     @param dataset: dataset to use for train
     @param dataset_test: dataset|None, dataset to use for test
     @param optimizer: str|torch.optim.Optimizer, optimizer to use
@@ -132,7 +132,7 @@ def train_dnn(
             loss_test = lossfn(out_test, torch.Tensor(dataset_test.y).to(torch.long).to(device)).cpu().detach().numpy()
         losses_test.append(loss_test)
 
-        if verbose:
+        if verbose and plots:
             try:
                 import IPython
                 IPython.display.clear_output(wait=True)
@@ -223,7 +223,7 @@ def mislabel(y, n, strategy='uniform', seed=0, compat_consume_random_twice=True)
     @param seed: int, numpy random seed
     @return: tuple (y, mislabel_idx), new changed class labels, indices of changed class labels
     '''
-    assert strategy in ['uniform', 'proportional']
+    assert strategy in ['uniform', 'proportional'], f'strategy {strategy} is not supported'
 
     n_samples = y.shape[0]
     n_classes = max(y) + 1
@@ -241,8 +241,6 @@ def mislabel(y, n, strategy='uniform', seed=0, compat_consume_random_twice=True)
     elif strategy == 'proportional':
         unique, counts = numpy.unique(y, return_counts=True)
         p[unique] = counts.astype(numpy.float64) / n_samples
-    else:
-        assert False, f'strategy {strategy} is not supported'
 
     y_result = numpy.zeros_like(y)
     y_result[:] = y[:]
@@ -252,8 +250,6 @@ def mislabel(y, n, strategy='uniform', seed=0, compat_consume_random_twice=True)
                 new_class = rnd.choice(n_classes)
             elif strategy == 'proportional':
                 new_class = rnd.choice(n_classes, p=p)
-            else:
-                assert False
             if new_class != y[i]:
                 y_result[i] = new_class
                 break
@@ -414,7 +410,9 @@ class ADELabelUpdaterAllSamples(object):
         # update labels
         if ibatch % self.label_update == 0 and ibatch > self.first_update:
             if self.prints:
-                print(f'batch #{ibatch}', 'changes:', numpy.where(self.dataset.y_new != numpy.argmax(self.dataset.p, axis=1))[0])
+                changed = numpy.where(self.dataset.y_new != numpy.argmax(self.dataset.p, axis=1))[0]
+                if len(changed):
+                    print(f'batch #{ibatch}', 'changes:', changed)
             self.dataset.update_class_probabilities(self.dataset.p)
 
 
@@ -486,31 +484,62 @@ def scrock(
     X, y,
     D = 0.9,
     l_ps = [0.5, 0.75, 1.0, 1.25, 1.5],
-    net = None,
-    label_update = None,
+    net_factory = None,
+    label_update_factory = None,
     optimizer = 'adam', optimizer_lr = 0.0001, n_epochs = 40, n_batches = None, batch_size = 32, batch_replace = False,
     voting_scheme = voting_scheme_max_votes_original_if_tie,
+    verbose = False,
 ):
+    '''
+    Runs scROCK ensemble algorithm
+    @param X: array-like (n_samples, n_features), feature values for samples
+    @param y: array-like (n_samples,), classes of samples, 0..n_classes-1
+    @param D: float, probability that label of sample is correct
+    @param l_ps: array like of floats, L_p ADE parameters for ensemble
+    @param net_factory: callable, accepts (ialgo) for seed, should return torch.nn.Module
+    @param label_update_factory: callable, accepts (l_p) for L_p, should return callable to be called every batch
+    @param optimizer: see train_dnn
+    @param optimizer_lr: see train_dnn
+    @param n_epochs: see train_dnn
+    @param n_batches: see train_dnn
+    @param batch_size: see train_dnn
+    @param batch_replace: see train_dnn
+    @param voting_scheme: callable, accepts (P, y_original), where P is array-like (n_algos, n_samples, n_classes) of probability outputs of ensemble algorithms; should return array-like (n_samples) with class labels
+    @param verbose: bool, show verbose process output
+    @return array-like (n_samples,), proposed by scROCK classes of samples
+    '''
     n_algos = len(l_ps)
     y_proba = None
     for ialgo, l_p in enumerate(l_ps):
+        if verbose:
+            import time
+            t0 = time.time()
+            print(f'Run ADE with L_p = {l_p}')
+
         dataset = DatasetWithMutableLabels(X, y, D = D, seed = ialgo)
+
         if y_proba is None:
             y_proba = numpy.zeros((n_algos, dataset.n_samples, dataset.n_classes))
-        if net is None:
+
+        if net_factory is None:
             net = MLPWithLinearOutput(
                 dataset.n_features, dataset.n_classes,
                 layers = [32, 16], nonlinearity = 'relu', batch_norm = False,
                 seed = ialgo
             )
-        if label_update is None:
+        else:
+            net = net_factory(ialgo)
+
+        if label_update_factory is None:
             label_update = ADELabelUpdaterAllSamples(
                 dataset,
                 first_update = 300, label_update = 1,
                 lr = l_p,
                 start_update_U_after_first_update = True,
-                prints = False,
+                prints = verbose,
             )
+        else:
+            label_update = label_update_factory(l_p)
 
         train_dnn(
             net,
@@ -518,12 +547,17 @@ def scrock(
             optimizer = optimizer, optimizer_lr = optimizer_lr,
             n_epochs = n_epochs, n_batches = n_batches,
             batch_size = batch_size, batch_replace = batch_replace,
-            verbose = False,
+            verbose = verbose,
             on_each_batch = label_update,
             seed = ialgo,
         )
 
         y_proba[ialgo, :, :] = dataset.p
+
+        if verbose:
+            print(f'Changed {numpy.sum(dataset.y_new != dataset.y)} class labels')
+            print(f'Run ADE with L_p = {l_p} done in {time.time() - t0:.3f} s')
+            print()
     
     return voting_scheme(y_proba, y)
 
