@@ -7,6 +7,11 @@ scROCK (single-cell Refinement Of Cluster Knitting) is an algorithm for correcti
 
 ```pip install https://github.com/dos257/ADE/tarball/master```
 
+For private repository use:
+```pip install git+https://{token}@github.com/dos257/ADE.git```
+
+Use keys `--upgrade --no-deps --force-reinstall` for forced update from git repository.
+
 
 ## Usage
 
