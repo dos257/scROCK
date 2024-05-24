@@ -15,7 +15,7 @@ Use keys `--upgrade --no-deps --force-reinstall` for forced update from git repo
 
 ## Usage
 
-If `X` is log1p-preprocessed `numpy.array` of shape `(n_samples, n_genes)` and `y` is clustering labels (from Leiden algorithm),
+If `X` is log1p-preprocessed `numpy.array` of shape `(n_samples, n_genes)` and `y` is integer clustering labels (from Leiden algorithm),
 
 ```python
 from scrock import scrock

@@ -267,7 +267,7 @@ def md5(s):
 
 
 
-def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx, prints=True, returns=False):
+def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx, y_mislabel=None, prints=True, returns=False):
     '''
     Prints comparison table of label equality, separately for all and mislabelled indices
     @param y_true: array-like (n_samples,), ground truth labels
@@ -278,6 +278,8 @@ def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx, prints=True, returns=
     fail = numpy.sum(y != y_true)
     ok_mislabels = numpy.sum(y[mislabel_idx] == y_true[mislabel_idx])
     fail_mislabels = numpy.sum(y[mislabel_idx] != y_true[mislabel_idx])
+    if y_mislabel is not None:
+        still_fail_mislabels = numpy.sum((y[mislabel_idx] != y_true[mislabel_idx]) & (y[mislabel_idx] != y_mislabel[mislabel_idx]))
     ok_truelabels = ok - ok_mislabels
     fail_truelabels = fail - fail_mislabels
     n_mislabels = ok_mislabels + fail_mislabels
@@ -301,6 +303,8 @@ def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx, prints=True, returns=
         print(f'OK    {ok_truelabels:-11d}  {ok_mislabels:-9d}  {ok}')
         print(f'Fail  {fail_truelabels:-11d}  {fail_mislabels:-9d}  {fail}')
         print(f'      {n_truelabels:-11d}  {n_mislabels:-9d}')
+        if y_mislabel is not None:
+            print(f'Mislabels changed but still fail = {still_fail_mislabels}')
         print(f'Accuracy = {accuracy_score}')
         print(f'F1 score = {f1_score}')
         print()
@@ -508,6 +512,14 @@ def scrock(
     @param verbose: bool, show verbose process output
     @return array-like (n_samples,), proposed by scROCK classes of samples
     '''
+    assert numpy.all(X >= 0.0), 'All values in log-normalized X should be non-negative'
+    assert numpy.sum((X > 0.0) & (X < 1.0)) > 0, 'At least one value in log-normalized X should be in (0,1)'
+    assert numpy.sum(X > 20.0) == 0, f'No value in log-normalized X should be larger than 20, found {numpy.max(X)}'
+
+    assert set(y) < set(range(100)), 'y should contain integer class numbers in range [0,100['
+
+    assert X.shape[0] == y.shape[0], f'X should contain the same number of samples as y, but X.shape = {X.shape}, y.shape = {y.shape}'
+
     n_algos = len(l_ps)
     y_proba = None
     for ialgo, l_p in enumerate(l_ps):
