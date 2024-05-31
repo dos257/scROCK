@@ -267,7 +267,7 @@ def md5(s):
 
 
 
-def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx, y_mislabel=None, prints=True, returns=False):
+def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx=[], y_mislabel=None, prints=True, returns=False):
     '''
     Prints comparison table of label equality, separately for all and mislabelled indices
     @param y_true: array-like (n_samples,), ground truth labels
@@ -280,6 +280,9 @@ def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx, y_mislabel=None, prin
     fail_mislabels = numpy.sum(y[mislabel_idx] != y_true[mislabel_idx])
     if y_mislabel is not None:
         still_fail_mislabels = numpy.sum((y[mislabel_idx] != y_true[mislabel_idx]) & (y[mislabel_idx] != y_mislabel[mislabel_idx]))
+        total_changed = numpy.sum(y != y_mislabel)
+    else:
+        total_changed = numpy.sum(y != y_true)
     ok_truelabels = ok - ok_mislabels
     fail_truelabels = fail - fail_mislabels
     n_mislabels = ok_mislabels + fail_mislabels
@@ -305,6 +308,7 @@ def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx, y_mislabel=None, prin
         print(f'      {n_truelabels:-11d}  {n_mislabels:-9d}')
         if y_mislabel is not None:
             print(f'Mislabels changed but still fail = {still_fail_mislabels}')
+        print(f'Changed total = {total_changed}')
         print(f'Accuracy = {accuracy_score}')
         print(f'F1 score = {f1_score}')
         print()
@@ -364,7 +368,8 @@ class ADELabelUpdaterAllSamples(object):
         self.train_process = []
 
     def inv_sigmoid(self, x):
-        return numpy.log(x/(1-x))
+        #return numpy.log(x/(1-x))
+        return numpy.log(x)
 
     def __call__(self, ibatch, batch_idx, net, output_device, output_cpu, loss):
         import scipy.special
@@ -493,6 +498,8 @@ def scrock(
     optimizer = 'adam', optimizer_lr = 0.0001, n_epochs = 40, n_batches = None, batch_size = 32, batch_replace = False,
     voting_scheme = voting_scheme_max_votes_original_if_tie,
     verbose = False,
+    check_data = True,
+    seed = 0,
 ):
     '''
     Runs scROCK ensemble algorithm
@@ -510,25 +517,28 @@ def scrock(
     @param batch_replace: see train_dnn
     @param voting_scheme: callable, accepts (P, y_original), where P is array-like (n_algos, n_samples, n_classes) of probability outputs of ensemble algorithms; should return array-like (n_samples) with class labels
     @param verbose: bool, show verbose process output
+    @param check_data: bool, to check if input data looks like log1p gene expression levels (non-negative, float, less than 20)
+    @param seed: int, seed + ialgo is used as a seed for all parts of scROCK ensemble item
     @return array-like (n_samples,), proposed by scROCK classes of samples
     '''
-    assert numpy.all(X >= 0.0), 'All values in log-normalized X should be non-negative'
-    assert numpy.sum((X > 0.0) & (X < 1.0)) > 0, 'At least one value in log-normalized X should be in (0,1)'
-    assert numpy.sum(X > 20.0) == 0, f'No value in log-normalized X should be larger than 20, found {numpy.max(X)}'
+    if check_data:
+        assert numpy.all(X >= 0.0), 'All values in log-normalized X should be non-negative'
+        assert numpy.sum((X > 0.0) & (X < 1.0)) > 0, 'At least one value in log-normalized X should be in (0,1)'
+        assert numpy.sum(X > 20.0) == 0, f'No value in log-normalized X should be larger than 20, found {numpy.max(X)}'
 
     assert set(y) < set(range(100)), 'y should contain integer class numbers in range [0,100['
-
     assert X.shape[0] == y.shape[0], f'X should contain the same number of samples as y, but X.shape = {X.shape}, y.shape = {y.shape}'
 
     n_algos = len(l_ps)
     y_proba = None
     for ialgo, l_p in enumerate(l_ps):
+        seed_ialgo = seed + ialgo
         if verbose:
             import time
             t0 = time.time()
             print(f'Run ADE with L_p = {l_p}')
 
-        dataset = DatasetWithMutableLabels(X, y, D = D, seed = ialgo)
+        dataset = DatasetWithMutableLabels(X, y, D = D, seed = seed_ialgo)
 
         if y_proba is None:
             y_proba = numpy.zeros((n_algos, dataset.n_samples, dataset.n_classes))
@@ -537,10 +547,10 @@ def scrock(
             net = MLPWithLinearOutput(
                 dataset.n_features, dataset.n_classes,
                 layers = [32, 16], nonlinearity = 'relu', batch_norm = False,
-                seed = ialgo
+                seed = seed_ialgo
             )
         else:
-            net = net_factory(ialgo)
+            net = net_factory(seed_ialgo)
 
         if label_update_factory is None:
             label_update = ADELabelUpdaterAllSamples(
@@ -561,7 +571,7 @@ def scrock(
             batch_size = batch_size, batch_replace = batch_replace,
             verbose = verbose,
             on_each_batch = label_update,
-            seed = ialgo,
+            seed = seed_ialgo,
         )
 
         y_proba[ialgo, :, :] = dataset.p
