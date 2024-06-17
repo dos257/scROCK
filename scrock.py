@@ -67,7 +67,7 @@ def train_dnn(
     net, dataset, dataset_test=None,
     optimizer='nadam', optimizer_lr = 0.0001,
     n_epochs=100, n_batches=None,
-    batch_size=32, batch_replace=False,
+    batch_size=32, batch_scheme='random-shuffle',
     verbose=False, plots=False, on_each_batch=None, seed=0
 ):
     '''
@@ -86,7 +86,9 @@ def train_dnn(
     @param seed: int, torch random seed
     '''
     assert type(n_epochs) is not None and n_batches is None or n_epochs is None and type(n_batches) is not None, 'Only one of n_epochs, n_batches should be not None'
+    assert batch_scheme in ['random-shuffle']
 
+    # TOFIX: where it should be?
     torch.manual_seed(seed)
     net.to(device)
     if verbose:
@@ -114,11 +116,16 @@ def train_dnn(
         n_epochs = (n_batches + n_epoch_batches - 1) // n_epoch_batches
     ibatch = 0
 
+    rnd = torch.Generator()
+    rnd.manual_seed(seed)
+    if batch_scheme == 'random-shuffle':
+        sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(dataset, generator=rnd), batch_size=batch_size, drop_last=False)
+
     for epoch in (tqdm(range(n_epochs)) if verbose else range(n_epochs)):
         losses_epoch = []
-        for i_epoch_batch in range(n_epoch_batches):
+        for i_epoch_batch, batch_idx in enumerate(sampler):
             optimizer.zero_grad()
-            batch_idx, X_batch, y_batch = dataset.batch(batch_size, replace=batch_replace)
+            X_batch, y_batch = dataset[batch_idx]
             out_train = net(torch.Tensor(X_batch).to(device))
             loss_train = lossfn(out_train, torch.Tensor(y_batch).to(torch.long).to(device))
 
@@ -164,8 +171,7 @@ def train_dnn(
 
 
 
-# TODO: torch.utils.data.Dataset
-class DatasetWithMutableLabels(object):
+class DatasetWithMutableLabels(torch.utils.data.Dataset):
     def __init__(self, X, y, D=1.0, seed=0):
         '''
         @param X: array-like (n_samples, n_features), feature values for samples
@@ -173,6 +179,7 @@ class DatasetWithMutableLabels(object):
         @param D: float, probability that label of sample is correct
         @param seed: int, numpy random seed
         '''
+        super().__init__()
         self.X = X
         self.y = y
         self.y_mislabel = y.copy()
@@ -184,6 +191,12 @@ class DatasetWithMutableLabels(object):
         self.p = self.smoothed_probabilities(self.n_samples, self.n_classes, self.y, self.D)
         self.rnd = numpy.random.RandomState(seed)
 
+    def __getitem__(self, index):
+        return self.X[index, :], self.y_new[index]
+
+    def __len__(self):
+        return self.n_samples
+
     def smoothed_probabilities(self, n_samples, n_classes, y, D):
         p = numpy.zeros((n_samples, n_classes))
         D_others = (1 - D) / (n_classes - 1)
@@ -192,15 +205,6 @@ class DatasetWithMutableLabels(object):
             p[i, y[i]] = D
         return p
 
-    def batch(self, batch_size, replace=False):
-        '''
-        @param batch_size: int, size of batch
-        @param replace: bool, choice batch with replacement (bootstrap) or no (usual NN batches)
-        @return: tuple (indices of batch, X_batch, y_batch)
-        '''
-        batch_idx = self.rnd.choice(self.n_samples, batch_size, replace=replace)
-        return batch_idx, self.X[batch_idx, :], self.y_new[batch_idx]
-    
     def update_class_probabilities(self, new_p, batch_idx=None):
         '''
         @param new_p: array-like (batch_size, n_classes), new values of class probabilities
@@ -453,7 +457,7 @@ def scrock(
     l_ps = [0.5, 0.75, 1.0, 1.25, 1.5],
     net_factory = None,
     label_update_factory = None,
-    optimizer = 'adam', optimizer_lr = 0.0001, n_epochs = 40, n_batches = None, batch_size = 32, batch_replace = False,
+    optimizer = 'adam', optimizer_lr = 0.0001, n_epochs = 40, n_batches = None, batch_size = 32, batch_scheme = 'random-shuffle',
     voting_scheme = voting_scheme_max_votes_original_if_tie,
     verbose = False,
     check_data = True,
@@ -472,7 +476,7 @@ def scrock(
     @param n_epochs: see train_dnn
     @param n_batches: see train_dnn
     @param batch_size: see train_dnn
-    @param batch_replace: see train_dnn
+    @param batch_scheme: see train_dnn
     @param voting_scheme: callable, accepts (P, y_original), where P is array-like (n_algos, n_samples, n_classes) of probability outputs of ensemble algorithms; should return array-like (n_samples) with class labels
     @param verbose: bool, show verbose process output
     @param check_data: bool, to check if input data looks like log1p gene expression levels (non-negative, float, less than 20)
@@ -526,7 +530,7 @@ def scrock(
             dataset, dataset_test = None,
             optimizer = optimizer, optimizer_lr = optimizer_lr,
             n_epochs = n_epochs, n_batches = n_batches,
-            batch_size = batch_size, batch_replace = batch_replace,
+            batch_size = batch_size, batch_scheme = batch_scheme,
             verbose = verbose,
             on_each_batch = label_update,
             seed = seed_ialgo,
