@@ -6,6 +6,15 @@ from tqdm import tqdm
 
 
 
+unicode = str
+def md5(s):
+    import hashlib
+    if type(s) == unicode:
+        s = s.encode('utf-8')
+    return hashlib.md5(s).hexdigest()
+
+
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -258,22 +267,19 @@ def mislabel(y, n, strategy='uniform', seed=0, compat_consume_random_twice=True)
 
 
 
-unicode = str
-def md5(s):
-    import hashlib
-    if type(s) == unicode:
-        s = s.encode('utf-8')
-    return hashlib.md5(s).hexdigest()
-
-
-
 def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx=[], y_mislabel=None, prints=True, returns=False):
     '''
     Prints comparison table of label equality, separately for all and mislabelled indices
     @param y_true: array-like (n_samples,), ground truth labels
     @param y: array-like (n_samples,), predicted labels
     @param mislabel_idx: array-like (n_mislabel), indices of mislabelled samples
+    @param y_mislabel: array-like (n_samples,), class labels after mislabelling if it was performed, None otherwise
+    @param prints: bool, to print report
+    @param returns: bool, to return report data as dict
+    @return: dict, report data, see result; None if returns=False
     '''
+    import sklearn.metrics
+
     ok = numpy.sum(y == y_true)
     fail = numpy.sum(y != y_true)
     ok_mislabels = numpy.sum(y[mislabel_idx] == y_true[mislabel_idx])
@@ -282,6 +288,7 @@ def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx=[], y_mislabel=None, p
         still_fail_mislabels = numpy.sum((y[mislabel_idx] != y_true[mislabel_idx]) & (y[mislabel_idx] != y_mislabel[mislabel_idx]))
         total_changed = numpy.sum(y != y_mislabel)
     else:
+        still_fail_mislabels = None
         total_changed = numpy.sum(y != y_true)
     ok_truelabels = ok - ok_mislabels
     fail_truelabels = fail - fail_mislabels
@@ -296,10 +303,21 @@ def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx=[], y_mislabel=None, p
     (tn, tp), (fp, fn) = accuracy_table
     f1_score = 2.0 * tp / (2 * tp + fp + fn)
     accuracy_score = float(tn + tp) / (tn + tp + fn + fp)
+    y_pred_md5 = md5(''.join(map(str, y)))
+
+    result = {
+        'confusion_matrix': sklearn.metrics.confusion_matrix(y_true, y),
+        'table': accuracy_table,
+        'accuracy': accuracy_score,
+        'f1': f1_score,
+        'adjusted_rand': sklearn.metrics.adjusted_rand_score(y_true, y),
+        'mislabels_changed_but_still_fail': still_fail_mislabels,
+        'changed_total': total_changed,
+        'y_pred_md5': y_pred_md5,
+    }
 
     if prints:
-        import sklearn.metrics
-        print(sklearn.metrics.confusion_matrix(y_true, y))
+        print(result['confusion_matrix'])
         print()
         print( '      True labels  Mislabels')
         print( '      -----------  ---------')
@@ -308,14 +326,15 @@ def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx=[], y_mislabel=None, p
         print(f'      {n_truelabels:-11d}  {n_mislabels:-9d}')
         if y_mislabel is not None:
             print(f'Mislabels changed but still fail = {still_fail_mislabels}')
-        print(f'Changed total = {total_changed}')
-        print(f'Accuracy = {accuracy_score}')
-        print(f'F1 score = {f1_score}')
+        print(f'Changed total = {result["changed_total"]}')
+        print(f'Accuracy = {result["accuracy"]}')
+        print(f'F1 score = {result["f1"]}')
+        print(f'Adj. Rand score = {result["adjusted_rand"]}')
         print()
-        print('MD5 of y_pred = ' + md5(b''.join(map(bytes, y))))
+        print(f'MD5 of y_pred = {result["y_pred_md5"]}')
 
     if returns:
-        return accuracy_table
+        return result
 
 
 
