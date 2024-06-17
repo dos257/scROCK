@@ -30,7 +30,7 @@ class MLPWithLinearOutput(torch.nn.Module):
     @param seed: int, torch seed to initialize NN weights
     '''
     def __init__(self, n_features, n_classes, layers = [32, 16], nonlinearity='relu', batch_norm=False, seed=0):
-        super(MLPWithLinearOutput, self).__init__()
+        super().__init__()
         self.n_features = n_features
         self.n_classes = n_classes
         layer_sizes = [self.n_features] + layers + [self.n_classes]
@@ -348,47 +348,27 @@ class ADEBatchCallback(object):
 
 
 
-class ADELabelUpdaterBatch(object):
+class ADELabelUpdaterAllSamples(ADEBatchCallback):
     '''
     Updates dataset class probabilities according to ADE scheme
     as in Zeng, Xinchuan & Martinez, Tony. (2001). An algorithm for correcting mislabeled data. Intell. Data Anal.. 5. 491-502. doi:10.3233/IDA-2001-5605
     @param dataset: dataset that able to update probabilities
-    @param lr: float, learning rate
+    @param l_p: float, learning rate
     '''
-    def __init__(self, dataset, lr=0.02):
-        self.dataset = dataset
-        self.lr = lr
-    
-    def __call__(self, ibatch, batch_idx, net, output_device, output_cpu, loss):
-        # Update class probabilities
-        probs = scipy.special.softmax(output_cpu)
-        # TOFIX
-        #batch_u = scipy.special.logit(self.dataset.p[batch_idx])
-        batch_u = numpy.log(self.dataset.p[batch_idx])
-        batch_u += self.lr * (probs - self.dataset.p[batch_idx])
-        p = scipy.special.softmax(batch_u)
-        self.dataset.update_class_probabilities(p, batch_idx)
-
-
-
-class ADELabelUpdaterAllSamples(object):
-    def __init__(self, dataset, first_update, label_update, lr, start_update_U_after_first_update=False, collect_train_process = False, prints=True):
+    def __init__(self, dataset, first_update, label_update, l_p, start_update_U_after_first_update=False, collect_train_process = False, prints=True):
+        super().__init__()
         self.dataset = dataset
         self.first_update = first_update
         self.label_update = label_update
-        self.lr = lr
+        self.l_p = l_p
         self.start_update_U_after_first_update = start_update_U_after_first_update
         self.collect_train_process = collect_train_process
         self.prints = prints
 
         #self.scd_p = self.dataset.smoothed_probabilities(dataset.n_samples, dataset.n_classes, dataset.y, dataset.D)
-        self.scd_U = self.inv_sigmoid(self.dataset.p)
+        self.scd_U = numpy.log(self.dataset.p)
 
         self.train_process = []
-
-    def inv_sigmoid(self, x):
-        #return numpy.log(x/(1-x))
-        return numpy.log(x)
 
     def __call__(self, ibatch, batch_idx, net, output_device, output_cpu, loss):
         import scipy.special
@@ -399,7 +379,7 @@ class ADELabelUpdaterAllSamples(object):
         batch_v = self.dataset.p[batch_idx]
         batch_u = self.scd_U[batch_idx]
 
-        batch_u2 = batch_u + self.lr * (probs - batch_v)
+        batch_u2 = batch_u + self.l_p * (probs - batch_v)
 
         if self.collect_train_process:
             loss = sklearn.metrics.log_loss(
@@ -442,47 +422,6 @@ class ADELabelUpdaterAllSamples(object):
                 if len(changed):
                     print(f'batch #{ibatch}', 'changes:', changed)
             self.dataset.update_class_probabilities(self.dataset.p)
-
-
-
-def run_ade_single(
-    dataset,
-    net = None,
-    label_update = None,
-    optimizer = 'adam', optimizer_lr = 0.0001, n_epochs = 40, n_batches = None, batch_size = 32, batch_replace = False, train_dnn_seed = 0,
-    verbose=True,
-):
-    '''
-    Runs all ADE pipeline
-    @param dataset: dataset to run ADE on
-    @param net: torch.nn.Module, which will be used to correct class labels via ADE
-    @param label_update: callable, will be used to change class label probabilities on each batch
-    @param optimizer: str|torch.optim.Optimizer, see `train_dnn`
-    @param optimizer_lr: see `train_dnn`
-    @param n_epochs: int|None, see `train_dnn`
-    @param n_batches: int|None, see `train_dnn`
-    @param batch_size: int, see `train_dnn`
-    @param batch_replace: bool, see `train_dnn`
-    @param train_dnn_seed: int, see `seed` in `train_dnn`
-    @param verbose: bool, see `train_dnn`, also outputs mislabelling stats
-    @return: tuple (y_new, mislabel_idx), new sample class labels after ADE, indices of initially mislabelled class labels
-    '''
-    if verbose:
-        print_accuracy_vs_mislabeling(dataset.y, dataset.y_mislabel, dataset.mislabel_idx)
-
-    train_dnn(
-        net,
-        dataset, dataset_test = None,
-        optimizer = optimizer, optimizer_lr = optimizer_lr,
-        n_epochs = n_epochs, n_batches = n_batches,
-        batch_size = batch_size,
-        batch_replace = batch_replace,
-        verbose = verbose,
-        on_each_batch = label_update,
-        seed = train_dnn_seed,
-    )
-
-    return dataset.y_new, dataset.mislabel_idx
 
 
 
@@ -545,7 +484,7 @@ def scrock(
         assert numpy.sum((X > 0.0) & (X < 1.0)) > 0, 'At least one value in log-normalized X should be in (0,1)'
         assert numpy.sum(X > 20.0) == 0, f'No value in log-normalized X should be larger than 20, found {numpy.max(X)}'
 
-    assert set(y) < set(range(100)), 'y should contain integer class numbers in range [0,100['
+    assert set(y) <= set(range(100)), 'y should contain integer class numbers in range [0,100['
     assert X.shape[0] == y.shape[0], f'X should contain the same number of samples as y, but X.shape = {X.shape}, y.shape = {y.shape}'
 
     n_algos = len(l_ps)
@@ -575,7 +514,7 @@ def scrock(
             label_update = ADELabelUpdaterAllSamples(
                 dataset,
                 first_update = 300, label_update = 1,
-                lr = l_p,
+                l_p = l_p,
                 start_update_U_after_first_update = True,
                 prints = verbose,
             )
