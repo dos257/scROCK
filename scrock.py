@@ -68,7 +68,7 @@ def train_dnn(
     optimizer='nadam', optimizer_lr = 0.0001,
     n_epochs=100, n_batches=None,
     batch_size=32, batch_scheme='random-shuffle',
-    verbose=False, plots=False, on_each_batch=None, seed=0
+    verbose=0, plots=False, on_each_batch=None, seed=0
 ):
     '''
     Trains DNN on dataset
@@ -82,7 +82,7 @@ def train_dnn(
     @param batch_size: int, size of batch
     @param batch_replace: bool, sample batch with replacement
     @param verbose: bool, show plot with losses
-    @param on_each_batch: callable, to call every batch
+    @param on_each_batch: None|callable|list of callables, callbacks to call every batch
     @param seed: int, torch random seed
     '''
     assert type(n_epochs) is not None and n_batches is None or n_epochs is None and type(n_batches) is not None, 'Only one of n_epochs, n_batches should be not None'
@@ -91,7 +91,7 @@ def train_dnn(
     # TOFIX: where it should be?
     torch.manual_seed(seed)
     net.to(device)
-    if verbose:
+    if verbose >= 2:
         print(net)
 
     if type(optimizer) == str:
@@ -121,7 +121,7 @@ def train_dnn(
     if batch_scheme == 'random-shuffle':
         sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(dataset, generator=rnd), batch_size=batch_size, drop_last=False)
 
-    for epoch in (tqdm(range(n_epochs)) if verbose else range(n_epochs)):
+    for epoch in (tqdm(range(n_epochs)) if verbose >= 1 else range(n_epochs)):
         losses_epoch = []
         for i_epoch_batch, batch_idx in enumerate(sampler):
             optimizer.zero_grad()
@@ -129,8 +129,15 @@ def train_dnn(
             out_train = net(torch.Tensor(X_batch).to(device))
             loss_train = lossfn(out_train, torch.Tensor(y_batch).to(torch.long).to(device))
 
-            if on_each_batch is not None:
+            if on_each_batch is None:
+                pass
+            elif callable(on_each_batch):
                 on_each_batch(ibatch, batch_idx, net, out_train, out_train.cpu().detach().numpy(), loss_train.cpu().detach().numpy())
+            elif type(on_each_batch) == list:
+                for callback in on_each_batch:
+                    callback(ibatch, batch_idx, net, out_train, out_train.cpu().detach().numpy(), loss_train.cpu().detach().numpy())
+            else:
+                assert False, f'on_each_batch of unknown type {type(on_each_batch)}'
 
             loss_train.backward()
             optimizer.step()
@@ -271,13 +278,13 @@ def mislabel(y, n, strategy='uniform', seed=0, compat_consume_random_twice=True)
 
 
 
-def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx=[], y_mislabel=None, prints=True, returns=False):
+def quality_mislabel_fixing(y_true, y, y_mislabel=None, mislabel_idx=[], prints=True, returns=False):
     '''
     Prints comparison table of label equality, separately for all and mislabelled indices
     @param y_true: array-like (n_samples,), ground truth labels
     @param y: array-like (n_samples,), predicted labels
-    @param mislabel_idx: array-like (n_mislabel), indices of mislabelled samples
     @param y_mislabel: array-like (n_samples,), class labels after mislabelling if it was performed, None otherwise
+    @param mislabel_idx: array-like (n_mislabel), indices of mislabelled samples
     @param prints: bool, to print report
     @param returns: bool, to return report data as dict
     @return: dict, report data, see result; None if returns=False
@@ -342,17 +349,46 @@ def print_accuracy_vs_mislabeling(y_true, y, mislabel_idx=[], y_mislabel=None, p
 
 
 
-class ADEBatchCallback(object):
+def quality_doublet_detection(y_true, labels, scores=None, prints=True, returns=False):
+    import sklearn.metrics
+    result = {
+        'precision': sklearn.metrics.precision_score(y_true, labels),
+        'recall': sklearn.metrics.recall_score(y_true, labels),
+        'confusion_matrix': sklearn.metrics.confusion_matrix(y_true, labels),
+        'accuracy': sklearn.metrics.accuracy_score(y_true, labels),
+        'f1': sklearn.metrics.f1_score(y_true, labels),
+        'roc_auc': sklearn.metrics.roc_auc_score(y_true, scores) if scores is not None else None,
+    }
+
+    if prints:
+        print('labels =', labels)
+        from collections import Counter
+        print(Counter(labels))
+        print('scores =', scores)
+
+        print()
+        print('Confusion matrix:')
+        print(result["confusion_matrix"])
+        print(f'Accuracy: {result["accuracy"]}')
+        print(f'Precision: {result["precision"]}')
+        print(f'Recall:    {result["recall"]}')
+        print(f'F1 score: {result["f1"]}')
+        print(f'AUC ROC:  {result["roc_auc"]}')
+
+    if returns:
+        return result
+
+
+
+class BatchCallback(object):
     def __init__(self):
         pass
     def __call__(self, ibatch, batch_idx, net, output_device, output_cpu, loss):
         pass
-    def __or__(self, rhs):
-        pass
 
 
 
-class ADELabelUpdaterAllSamples(ADEBatchCallback):
+class ADELabelUpdaterAllSamples(BatchCallback):
     '''
     Updates dataset class probabilities according to ADE scheme
     as in Zeng, Xinchuan & Martinez, Tony. (2001). An algorithm for correcting mislabeled data. Intell. Data Anal.. 5. 491-502. doi:10.3233/IDA-2001-5605
@@ -429,7 +465,93 @@ class ADELabelUpdaterAllSamples(ADEBatchCallback):
 
 
 
-def voting_scheme_max_votes(P, y_original, original_if_tie=False):
+class BaseReEstimator(object):
+    def __init__(self):
+        super().__init__()
+    def fit(self, X, y, verbose=0):
+        pass
+    def predict(self):
+        pass
+    def predict_proba(self):
+        pass
+
+
+
+class SelfClassifier(BaseReEstimator):
+    def __init__(self, base_estimator):
+        super().__init__()
+        self.base_estimator = base_estimator
+    def fit(self, X, y):
+        self.X = X.copy()
+        self.base_estimator.fit(X, y)
+    def predict(self):
+        return self.base_estimator.predict(self.X)
+    def predict_proba(self):
+        return self.base_estimator.predict_proba(self.X)
+
+
+
+class ADEReClassifier(BaseReEstimator):
+    def __init__(
+        self,
+        l_p = 1.0,
+        D = 0.9,
+        net = None, # TOFIX
+        label_update = None, # TOFIX
+        optimizer = 'adam', optimizer_lr = 1e-4, n_epochs = 40, n_batches = None, batch_size = 32, batch_scheme = 'random-shuffle',
+        seed = 0,
+    ):
+        self.l_p = l_p
+        self.D = D
+
+        self.optimizer = optimizer
+        self.optimizer_lr = optimizer_lr
+        self.n_epochs = n_epochs
+        self.n_batches = n_batches
+        self.batch_size = batch_size
+        self.batch_scheme = batch_scheme
+
+        self.seed = seed
+
+    def fit(self, X, y, verbose=0):
+        self.dataset = DatasetWithMutableLabels(
+            X, y,
+            D = self.D,
+            seed = self.seed
+        )
+        self.net = MLPWithLinearOutput(
+            self.dataset.n_features, self.dataset.n_classes,
+            layers = [32, 16], nonlinearity = 'relu', batch_norm = False,
+            seed = self.seed,
+        )
+        self.label_update = ADELabelUpdaterAllSamples(
+            self.dataset,
+            first_update = 300, label_update = 1,
+            l_p = self.l_p,
+            start_update_U_after_first_update = True,
+            prints = verbose >= 3,
+        )
+        train_dnn(
+            self.net,
+            self.dataset, dataset_test = None,
+            optimizer = self.optimizer, optimizer_lr = self.optimizer_lr,
+            n_epochs = self.n_epochs, n_batches = self.n_batches,
+            batch_size = self.batch_size, batch_scheme = self.batch_scheme,
+            verbose = verbose,
+            on_each_batch = self.label_update,
+            seed = self.seed,
+        )
+
+    def predict(self):
+        return numpy.argmax(self.dataset.p, axis=1)
+
+    def predict_proba(self):
+        return self.dataset.p
+
+
+
+def voting_scheme_max_votes(P, y_original, original_if_tie='best'):
+    assert original_if_tie in ['best', 'always']
     n_voters, n_samples, n_classes = P.shape
     y_votes = numpy.argmax(P, axis=2)
     result = numpy.zeros((n_samples), dtype=numpy.uint32)
@@ -437,31 +559,101 @@ def voting_scheme_max_votes(P, y_original, original_if_tie=False):
         bc = numpy.bincount(y_votes[:, i], minlength=n_classes)
         best = numpy.argmax(bc)
         best_votes = numpy.sum(y_votes[:, i] == best)
-        if numpy.sum(bc == best_votes) > 1 and (original_if_tie or bc[y_original[i]] == best_votes):
+        if numpy.sum(bc == best_votes) > 1 and (original_if_tie == 'always' or original_if_tie == 'best' and bc[y_original[i]] == best_votes):
             result[i] == y_original[i]
         else:
             result[i] = best
     return result
 
 def voting_scheme_max_votes_original_if_tie(P, y_original, *args):
-    return voting_scheme_max_votes(P, y_original, original_if_tie=True)
+    return voting_scheme_max_votes(P, y_original, original_if_tie='always')
 
 def voting_scheme_max_p_product(P, *args):
     return numpy.argmax(numpy.sum(numpy.log(P), axis=0), axis=1)
+
+def voting_scheme_max_p_sum(P, *args):
+    return numpy.argmax(numpy.sum(P, axis=0), axis=1)
+
+
+
+def default_net_factory(input_dim, output_dim, seed):
+    args, kwargs = (input_dim, output_dim), dict(
+        layers = [32, 16], nonlinearity = 'relu', batch_norm = False,
+        seed = seed,
+    )
+    return MLPWithLinearOutput(*args, **kwargs)
+
+def default_label_update_factory(dataset, l_p, never_change_indices, verbose):
+    args, kwargs = (dataset,), dict(
+        first_update = 300, label_update = 1,
+        l_p = l_p,
+        start_update_U_after_first_update = True,
+        never_change_indices = never_change_indices,
+        prints = verbose,
+    )
+    return ADELabelUpdaterAllSamples(*args, **kwargs)
+
+
+
+class ADEEnsembleReClassifier(BaseReEstimator):
+    def __init__(
+        self,
+        n_classifiers = None, l_ps = [1.0, 1.25, 1.5], D = 0.9,
+        voting_scheme = voting_scheme_max_votes_original_if_tie,
+        seed = 0,
+        collect=[]
+    ):
+        # TODO
+        self.collect = collect
+        self.collected = {}
+
+        if n_classifiers is None:
+            for param in [l_ps, D]:
+                if type(param) == list:
+                    n_classifiers = len(param)
+        self.n_classifiers = n_classifiers
+        self.l_ps = self._make_list(l_ps, self.n_classifiers)
+        self.D = self._make_list(D, self.n_classifiers)
+
+        self.voting_scheme = voting_scheme
+
+        self.ensemble = [
+            ADEReClassifier(l_p = self.l_ps[i], D = self.D[i], seed = seed + i)
+            for i in range(self.n_classifiers)
+        ]
+
+    def _make_list(self, value, length):
+        if type(value) == list:
+            assert len(value) == length
+            return value
+        return [value] * length
+
+    def fit(self, X, y, verbose=0):
+        self.y_original = y.copy()
+        for clf in self.ensemble:
+            clf.fit(X, y, verbose=0)
+
+    def predict(self):
+        return self.voting_scheme(self.predict_proba(), self.y_original)
+
+    def predict_proba(self):
+        # TOFIX: voting(predict_proba(ensemble)) should be the same as voting(predict(ensemble))
+        pass
 
 
 
 def scrock(
     X, y,
     D = 0.9,
-    l_ps = [0.5, 0.75, 1.0, 1.25, 1.5],
+    l_ps = [1.0, 1.25, 1.5],
     net_factory = None,
     label_update_factory = None,
     optimizer = 'adam', optimizer_lr = 0.0001, n_epochs = 40, n_batches = None, batch_size = 32, batch_scheme = 'random-shuffle',
     voting_scheme = voting_scheme_max_votes_original_if_tie,
-    verbose = False,
+    verbose = 1,
     check_data = True,
     seed = 0,
+    return_proba = False,
 ):
     '''
     Runs scROCK ensemble algorithm
@@ -469,8 +661,8 @@ def scrock(
     @param y: array-like (n_samples,), classes of samples, 0..n_classes-1
     @param D: float, probability that label of sample is correct
     @param l_ps: array like of floats, L_p ADE parameters for ensemble
-    @param net_factory: callable, accepts (ialgo) for seed, should return torch.nn.Module
-    @param label_update_factory: callable, accepts (l_p) for L_p, should return callable to be called every batch
+    @param net_factory: callable, accepts (input_dim, output_dim, seed), should return torch.nn.Module
+    @param label_update_factory: callable, accepts (dataset, l_p, verbose), should return callable to be called every batch
     @param optimizer: see train_dnn
     @param optimizer_lr: see train_dnn
     @param n_epochs: see train_dnn
@@ -478,7 +670,7 @@ def scrock(
     @param batch_size: see train_dnn
     @param batch_scheme: see train_dnn
     @param voting_scheme: callable, accepts (P, y_original), where P is array-like (n_algos, n_samples, n_classes) of probability outputs of ensemble algorithms; should return array-like (n_samples) with class labels
-    @param verbose: bool, show verbose process output
+    @param verbose: int, verbosity level (0 to show nothing, 1 - progress bar and result summary, 4 - debug output)
     @param check_data: bool, to check if input data looks like log1p gene expression levels (non-negative, float, less than 20)
     @param seed: int, seed + ialgo is used as a seed for all parts of scROCK ensemble item
     @return array-like (n_samples,), proposed by scROCK classes of samples
@@ -495,12 +687,14 @@ def scrock(
     y_proba = None
     for ialgo, l_p in enumerate(l_ps):
         seed_ialgo = seed + ialgo
-        if verbose:
+        if verbose >= 1:
             import time
             t0 = time.time()
             print(f'Run ADE with L_p = {l_p}')
 
         dataset = DatasetWithMutableLabels(X, y, D = D, seed = seed_ialgo)
+        input_dim = dataset.n_features
+        output_dim = dataset.n_classes
 
         if y_proba is None:
             y_proba = numpy.zeros((n_algos, dataset.n_samples, dataset.n_classes))
@@ -511,8 +705,10 @@ def scrock(
                 layers = [32, 16], nonlinearity = 'relu', batch_norm = False,
                 seed = seed_ialgo
             )
+            # TODO
+            #net = default_net_factory(input_dim, output_dim, seed_ialgo)
         else:
-            net = net_factory(seed_ialgo)
+            net = net_factory(input_dim, output_dim, seed_ialgo)
 
         if label_update_factory is None:
             label_update = ADELabelUpdaterAllSamples(
@@ -520,10 +716,12 @@ def scrock(
                 first_update = 300, label_update = 1,
                 l_p = l_p,
                 start_update_U_after_first_update = True,
-                prints = verbose,
+                prints = verbose >= 3,
             )
+            # TODO
+            #label_update = default_label_update_factory(dataset, l_p, verbose)
         else:
-            label_update = label_update_factory(l_p)
+            label_update = label_update_factory(dataset, l_p, verbose)
 
         train_dnn(
             net,
@@ -538,12 +736,15 @@ def scrock(
 
         y_proba[ialgo, :, :] = dataset.p
 
-        if verbose:
+        if verbose >= 1:
             print(f'Changed {numpy.sum(dataset.y_new != dataset.y)} class labels')
             print(f'Run ADE with L_p = {l_p} done in {time.time() - t0:.3f} s')
             print()
     
-    return voting_scheme(y_proba, y)
+    if return_proba:
+        return y_proba
+    else:
+        return voting_scheme(y_proba, y)
 
 
 

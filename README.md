@@ -21,3 +21,13 @@ If `X` is log1p-preprocessed `numpy.array` of shape `(n_samples, n_genes)` and `
 from scrock import scrock
 y_fixed = scrock(X, y)
 ```
+
+
+## Known issues
+If code consumes high CPU percent (but still works slowly), try:
+
+```python
+torch.set_num_threads(1)
+```
+
+Torch imperfect CPU parallelization spends most of the time in thread synchronization and slows down all process.
