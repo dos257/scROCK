@@ -179,7 +179,7 @@ def train_dnn(
 
 
 class DatasetWithMutableLabels(torch.utils.data.Dataset):
-    def __init__(self, X, y, D=1.0, seed=0):
+    def __init__(self, X, y, D=1.0, collect=[], seed=0):
         '''
         @param X: array-like (n_samples, n_features), feature values for samples
         @param y: array-like (n_samples,), classes of samples, 0..n_classes-1
@@ -196,6 +196,9 @@ class DatasetWithMutableLabels(torch.utils.data.Dataset):
         self.n_classes = max(y) + 1
         self.D = D
         self.p = self.smoothed_probabilities(self.n_samples, self.n_classes, self.y, self.D)
+
+        self.collect = collect
+        self.collected = {}
         self.rnd = numpy.random.RandomState(seed)
 
     def __getitem__(self, index):
@@ -234,6 +237,7 @@ class DatasetWithMutableLabels(torch.utils.data.Dataset):
 
 
 
+# TODO: proportional by default
 def mislabel(y, n, strategy='uniform', seed=0, compat_consume_random_twice=True):
     '''
     Changes class labels to others (not equal ones); uniformly or proportionally to class frequency
@@ -395,37 +399,70 @@ class ADELabelUpdaterAllSamples(BatchCallback):
     @param dataset: dataset that able to update probabilities
     @param l_p: float, learning rate
     '''
-    def __init__(self, dataset, first_update, label_update, l_p, start_update_U_after_first_update=False, collect_train_process = False, prints=True):
+    def __init__(self, dataset, first_update, label_update, l_p, start_update_U_after_first_update=False, collect_train_process = False, collect = [], prints=True):
         super().__init__()
         self.dataset = dataset
         self.first_update = first_update
         self.label_update = label_update
         self.l_p = l_p
         self.start_update_U_after_first_update = start_update_U_after_first_update
+
         self.collect_train_process = collect_train_process
+        self.train_process = []
+        self.collect = collect
+        self.collected = {}
         self.prints = prints
 
         #self.scd_p = self.dataset.smoothed_probabilities(dataset.n_samples, dataset.n_classes, dataset.y, dataset.D)
         self.scd_U = numpy.log(self.dataset.p)
 
-        self.train_process = []
+
+    def batch_collect(self, key, value):
+        if key in self.collect or self.collect == '*':
+            if key not in self.collected:
+                self.collected[key] = []
+            if callable(value):
+                self.collected[key].append(value())
+            else:
+                self.collected[key].append(value.copy())
+
 
     def __call__(self, ibatch, batch_idx, net, output_device, output_cpu, loss):
         import scipy.special
         import sklearn.metrics
 
+        self.batch_collect('batch_idx', batch_idx)
+        self.batch_collect('batch_y', self.dataset.y_new[batch_idx])
+
+
         probs = torch.nn.Softmax(dim=1)(output_device).cpu().detach().numpy()
+        self.batch_collect('batch_p_pred', probs)
+
+        self.batch_collect('all_p_pred', lambda: torch.nn.Softmax(dim=1)(
+            net(torch.Tensor(self.dataset.X).to(device))
+        ).cpu().detach().numpy())
+
+        # remove batch_?
+        # batch_ce
+
+        # can be calculated by consumer of batch_p_pred
+        # ce_vs_orig
+        # ce_vs_mislabel
+        # ce_vs_new
 
         batch_v = self.dataset.p[batch_idx]
+        self.batch_collect('batch_p_prev', batch_v)
+
         batch_u = self.scd_U[batch_idx]
 
         batch_u2 = batch_u + self.l_p * (probs - batch_v)
+        self.batch_collect('batch_p_new', batch_u2)
 
         if self.collect_train_process:
             loss = sklearn.metrics.log_loss(
                 self.dataset.y_new[batch_idx],
                 scipy.special.softmax(output_cpu, axis=1),
-                labels=range(self.dataset.n_classes)
+                labels=range(self.dataset.n_classes) # needed?
             )
             cur = {
                 'batch': ibatch,
@@ -456,16 +493,21 @@ class ADELabelUpdaterAllSamples(BatchCallback):
             self.scd_U[batch_idx] = batch_u
 
         # update labels
+        changed = numpy.array([], numpy.int64)
         if ibatch % self.label_update == 0 and ibatch > self.first_update:
+            y_new_prev = self.dataset.y_new.copy()
+            self.dataset.update_class_probabilities(self.dataset.p)
             if self.prints:
-                changed = numpy.where(self.dataset.y_new != numpy.argmax(self.dataset.p, axis=1))[0]
+                changed = numpy.where(self.dataset.y_new != y_new_prev)[0]
                 if len(changed):
                     print(f'batch #{ibatch}', 'changes:', changed)
-            self.dataset.update_class_probabilities(self.dataset.p)
+
+        self.batch_collect('batch_changes', changed)
+        self.batch_collect('y_new', self.dataset.y_new)
 
 
 
-class BaseReEstimator(object):
+class BaseReClassifier(object):
     def __init__(self):
         super().__init__()
     def fit(self, X, y, verbose=0):
@@ -477,13 +519,13 @@ class BaseReEstimator(object):
 
 
 
-class SelfClassifier(BaseReEstimator):
+class SelfClassifier(BaseReClassifier):
     def __init__(self, base_estimator):
         super().__init__()
         self.base_estimator = base_estimator
     def fit(self, X, y):
         self.X = X.copy()
-        self.base_estimator.fit(X, y)
+        return self.base_estimator.fit(X, y)
     def predict(self):
         return self.base_estimator.predict(self.X)
     def predict_proba(self):
@@ -491,18 +533,24 @@ class SelfClassifier(BaseReEstimator):
 
 
 
-class ADEReClassifier(BaseReEstimator):
+class ADEReClassifier(BaseReClassifier):
     def __init__(
         self,
         l_p = 1.0,
         D = 0.9,
         net = None, # TOFIX
         label_update = None, # TOFIX
+        label_update_first_update = 300,
         optimizer = 'adam', optimizer_lr = 1e-4, n_epochs = 40, n_batches = None, batch_size = 32, batch_scheme = 'random-shuffle',
+        add_on_each_batch = [],
+        collect = [],
+        verbose = 0,
         seed = 0,
     ):
         self.l_p = l_p
         self.D = D
+
+        self.label_update_first_update = label_update_first_update
 
         self.optimizer = optimizer
         self.optimizer_lr = optimizer_lr
@@ -511,13 +559,18 @@ class ADEReClassifier(BaseReEstimator):
         self.batch_size = batch_size
         self.batch_scheme = batch_scheme
 
+        self.add_on_each_batch = add_on_each_batch
+        self.collect = collect
+        self.collected = {}
+        self.verbose = verbose
         self.seed = seed
 
-    def fit(self, X, y, verbose=0):
+    def fit(self, X, y):
         self.dataset = DatasetWithMutableLabels(
             X, y,
             D = self.D,
-            seed = self.seed
+            collect = self.collect,
+            seed = self.seed,
         )
         self.net = MLPWithLinearOutput(
             self.dataset.n_features, self.dataset.n_classes,
@@ -526,10 +579,11 @@ class ADEReClassifier(BaseReEstimator):
         )
         self.label_update = ADELabelUpdaterAllSamples(
             self.dataset,
-            first_update = 300, label_update = 1,
+            first_update = self.label_update_first_update, label_update = 1,
             l_p = self.l_p,
             start_update_U_after_first_update = True,
-            prints = verbose >= 3,
+            prints = self.verbose >= 3,
+            collect = self.collect,
         )
         train_dnn(
             self.net,
@@ -537,10 +591,11 @@ class ADEReClassifier(BaseReEstimator):
             optimizer = self.optimizer, optimizer_lr = self.optimizer_lr,
             n_epochs = self.n_epochs, n_batches = self.n_batches,
             batch_size = self.batch_size, batch_scheme = self.batch_scheme,
-            verbose = verbose,
-            on_each_batch = self.label_update,
+            verbose = self.verbose,
+            on_each_batch = [self.label_update] + self.add_on_each_batch,
             seed = self.seed,
         )
+        return self
 
     def predict(self):
         return numpy.argmax(self.dataset.p, axis=1)
@@ -595,7 +650,7 @@ def default_label_update_factory(dataset, l_p, never_change_indices, verbose):
 
 
 
-class ADEEnsembleReClassifier(BaseReEstimator):
+class ADEEnsembleReClassifier(BaseReClassifier):
     def __init__(
         self,
         n_classifiers = None, l_ps = [1.0, 1.25, 1.5], D = 0.9,
@@ -615,7 +670,16 @@ class ADEEnsembleReClassifier(BaseReEstimator):
         self.l_ps = self._make_list(l_ps, self.n_classifiers)
         self.D = self._make_list(D, self.n_classifiers)
 
-        self.voting_scheme = voting_scheme
+        if callable(voting_scheme):
+            self.voting_scheme = voting_scheme
+        elif voting_scheme == 'max_votes':
+            self.voting_scheme = voting_scheme_max_votes
+        elif voting_scheme == 'max_votes_original_if_tie':
+            self.voting_scheme = voting_scheme_max_votes_original_if_tie
+        elif voting_scheme == 'max_p_product':
+            self.voting_scheme = voting_scheme_max_p_product
+        elif voting_scheme == 'max_p_sum':
+            self.voting_scheme = voting_scheme_max_p_sum
 
         self.ensemble = [
             ADEReClassifier(l_p = self.l_ps[i], D = self.D[i], seed = seed + i)
@@ -632,6 +696,7 @@ class ADEEnsembleReClassifier(BaseReEstimator):
         self.y_original = y.copy()
         for clf in self.ensemble:
             clf.fit(X, y, verbose=0)
+        return self
 
     def predict(self):
         return self.voting_scheme(self.predict_proba(), self.y_original)
@@ -639,6 +704,25 @@ class ADEEnsembleReClassifier(BaseReEstimator):
     def predict_proba(self):
         # TOFIX: voting(predict_proba(ensemble)) should be the same as voting(predict(ensemble))
         pass
+
+
+
+def simulate_doublets(X, n, seed=0):
+    n_samples, n_genes = X.shape
+    X_simulated = numpy.zeros((n, n_genes), dtype=X.dtype)
+    rnd = numpy.random.RandomState(seed)
+    simulated_indices = rnd.randint(0, n_samples, (n * 2,))
+    for i in range(n):
+        simulated_sample = X[simulated_indices[2 * i]] + X[simulated_indices[2 * i + 1]]
+        X_simulated[i, :] = simulated_sample
+    return X_simulated
+
+# TODO method = 'scrock'|'scanpy'
+def add_simulated_doublets(X, n, seed=0):
+    X_sim = simulate_doublets(X, n, seed)
+    X_result = numpy.vstack([X, X_sim])
+    y_result = numpy.hstack([numpy.zeros((X.shape[0],), dtype=numpy.int32), numpy.ones((n,), dtype=numpy.int32)])
+    return X_result, y_result
 
 
 
