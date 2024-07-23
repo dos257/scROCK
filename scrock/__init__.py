@@ -523,13 +523,18 @@ class SelfClassifier(BaseReClassifier):
     def __init__(self, base_estimator):
         super().__init__()
         self.base_estimator = base_estimator
+        self.y_pred = None
+        self.y_pred_proba = None
     def fit(self, X, y):
         self.X = X.copy()
-        return self.base_estimator.fit(X, y)
+        result = self.base_estimator.fit(X, y)
+        self.y_pred = self.base_estimator.predict(self.X)
+        self.y_pred_proba = self.base_estimator.predict_proba(self.X)
+        return result
     def predict(self):
-        return self.base_estimator.predict(self.X)
+        return self.y_pred
     def predict_proba(self):
-        return self.base_estimator.predict_proba(self.X)
+        return self.y_pred_proba
 
 
 
@@ -730,12 +735,13 @@ def scrock(
     X, y,
     D = 0.9,
     l_ps = [1.0, 1.25, 1.5],
-    net_factory = None,
-    label_update_factory = None,
-    optimizer = 'adam', optimizer_lr = 0.0001, n_epochs = 40, n_batches = None, batch_size = 32, batch_scheme = 'random-shuffle',
-    voting_scheme = voting_scheme_max_votes_original_if_tie,
+    net_factory = None, # TOFIX
+    label_update_factory = None, # TOFIX
+    optimizer = 'adam', optimizer_lr = 0.0001, n_epochs = 40, n_batches = None, batch_size = 32,
+    batch_scheme = 'random-shuffle', # TOREMOVE
+    voting_scheme = voting_scheme_max_p_sum, #voting_scheme_max_votes_original_if_tie, # TOREMOVE
     verbose = 1,
-    check_data = True,
+    check_data = True, # TOREMOVE
     seed = 0,
     return_proba = False,
 ):
@@ -759,16 +765,25 @@ def scrock(
     @param seed: int, seed + ialgo is used as a seed for all parts of scROCK ensemble item
     @return array-like (n_samples,), proposed by scROCK classes of samples
     '''
+
+    '''
     if check_data:
         assert numpy.all(X >= 0.0), 'All values in log-normalized X should be non-negative'
         assert numpy.sum((X > 0.0) & (X < 1.0)) > 0, 'At least one value in log-normalized X should be in (0,1)'
         assert numpy.sum(X > 20.0) == 0, f'No value in log-normalized X should be larger than 20, found {numpy.max(X)}'
+    '''
 
     assert set(y) <= set(range(100)), 'y should contain integer class numbers in range [0,100['
     assert X.shape[0] == y.shape[0], f'X should contain the same number of samples as y, but X.shape = {X.shape}, y.shape = {y.shape}'
 
+    n_samples, n_features = X.shape
+    n_classes = numpy.max(y) + 1
+
     n_algos = len(l_ps)
-    y_proba = None
+    #y_pred_proba = None
+    #if y_pred_proba is None:
+    y_pred_proba = numpy.zeros((n_algos, n_samples, n_classes))
+
     for ialgo, l_p in enumerate(l_ps):
         seed_ialgo = seed + ialgo
         if verbose >= 1:
@@ -776,12 +791,20 @@ def scrock(
             t0 = time.time()
             print(f'Run ADE with L_p = {l_p}')
 
+
+        algo = ADEReClassifier(
+            l_p = l_p, D = D,
+            optimizer=optimizer, optimizer_lr=optimizer_lr, n_epochs=n_epochs, n_batches=n_batches, batch_size=batch_size, batch_scheme=batch_scheme,
+            verbose=verbose,
+            seed = seed_ialgo,
+        )
+
+
+        '''
         dataset = DatasetWithMutableLabels(X, y, D = D, seed = seed_ialgo)
         input_dim = dataset.n_features
         output_dim = dataset.n_classes
 
-        if y_proba is None:
-            y_proba = numpy.zeros((n_algos, dataset.n_samples, dataset.n_classes))
 
         if net_factory is None:
             net = MLPWithLinearOutput(
@@ -817,18 +840,21 @@ def scrock(
             on_each_batch = label_update,
             seed = seed_ialgo,
         )
+        '''
+        algo.fit(X, y)
 
-        y_proba[ialgo, :, :] = dataset.p
+        y_pred_proba[ialgo, :, :] = algo.predict_proba() #dataset.p
 
         if verbose >= 1:
-            print(f'Changed {numpy.sum(dataset.y_new != dataset.y)} class labels')
+            print(f'Changed {numpy.sum(algo.dataset.y_new != algo.dataset.y)} class labels')
             print(f'Run ADE with L_p = {l_p} done in {time.time() - t0:.3f} s')
             print()
-    
+
+    y_pred = voting_scheme(y_pred_proba, y)
     if return_proba:
-        return y_proba
+        return y_pred, y_pred_proba
     else:
-        return voting_scheme(y_proba, y)
+        return y_pred
 
 
 
