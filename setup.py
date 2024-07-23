@@ -8,7 +8,10 @@ except:
 
 version = '0.0.1'
 
-install_requires = ['numpy', 'scipy', 'torch', 'tqdm', 'scikit-learn', 'matplotlib']
+install_requires = [
+    'numpy', 'scipy', 'torch', 'tqdm', 'scikit-learn', 'matplotlib',
+    'pandas', 'hdf5plugin', 'scanpy', 'requests', # for scrock.datasets
+]
 
 setup(
     name='scrock',
