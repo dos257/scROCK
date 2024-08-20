@@ -2,16 +2,23 @@ import os
 from distutils.core import setup
 
 try:
-    readme = open(os.path.join(os.path.dirname(__file__), 'README.md')).read()
+    readme = open(os.path.join(os.path.dirname(__file__), 'README.md'), 'r').read()
 except:
     readme = ''
 
 version = '0.0.1'
 
-install_requires = [
-    'numpy', 'scipy', 'torch', 'tqdm', 'scikit-learn', 'matplotlib',
-    'pandas', 'hdf5plugin', 'scanpy', 'requests', # for scrock.datasets
-]
+#install_requires = [
+#    'numpy', 'scipy', 'torch', 'tqdm', 'scikit-learn', 'matplotlib',
+#    'pandas', 'hdf5plugin', 'scanpy', 'requests', # for scrock.datasets
+#]
+
+with open(os.path.join(os.path.dirname(__file__), 'requirements.in'), 'r') as fp:
+    install_requires = [
+        line
+        for line in fp.read().splitlines()
+        if line and not line.startswith('#')
+    ]
 
 setup(
     name='scrock',

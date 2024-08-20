@@ -23,6 +23,28 @@ y_fixed = scrock(X, y)
 ```
 
 
+## Docker
+For convenience, `scrock` supports simplified command line:
+```
+python3 -m scrock refine_clusters data.h5ad
+```
+or `find_doublets` instead of `refine_clusters`
+
+For `refine_clusters` task, from file (here `data.h5ad`) `scrock` tries to read (in that order) `.obs["seurat_clusters"]`, `.obs["leiden"]`, `.obs["cell_line"]`.
+
+Also, this command line could be run inside Docker.
+
+Build Docker image:
+```
+docker build --tag scrock-image .
+```
+Run Docker image passing host path with input file:
+```
+docker run --name scrock --volume /host-path-to-input/data:/data scrock-image refine_clusters /data/sce_sc_10x_5cl_qc.h5ad
+```
+Output will be written to stdout.
+
+
 ## Known issues
 If code consumes high CPU percent (but still works slowly), try:
 

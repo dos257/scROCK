@@ -1,0 +1,11 @@
+numpy
+scipy
+torch
+tqdm
+scikit-learn
+matplotlib
+# for scrock.datasets
+pandas
+hdf5plugin
+scanpy
+requests
