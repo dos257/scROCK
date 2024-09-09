@@ -5,10 +5,10 @@ scROCK (single-cell Refinement Of Cluster Knitting) is an algorithm for correcti
 
 ## Installation
 
-```pip install https://github.com/dos257/ADE/tarball/master```
+```pip install https://github.com/dos257/scROCK/tarball/master```
 
 For private repository use:
-```pip install git+https://{token}@github.com/dos257/ADE.git```
+```pip install git+https://{token}@github.com/dos257/scROCK.git```
 
 Use keys `--upgrade --no-deps --force-reinstall` for forced update from git repository.
 
@@ -53,3 +53,7 @@ torch.set_num_threads(1)
 ```
 
 Torch imperfect CPU parallelization spends most of the time in thread synchronization and slows down all process.
+
+
+## Acknowledgements
+scROCK was developed under the supervision of Dr. Vikas Bansal (Head of Biomedical Data Science Group at German Center for Neurodegenerative Diseases (DZNE), Tübingen).

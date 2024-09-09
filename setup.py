@@ -36,7 +36,7 @@ setup(
     keywords='scRNA-seq, ADE, scROCK',
     author='dos257',
     author_email='149811921+dos257@users.noreply.github.com',
-    url='https://github.com/dos257/ADE',
+    url='https://github.com/dos257/scROCK',
     py_modules=['scrock'],
     license='MIT',
     install_requires=install_requires,
