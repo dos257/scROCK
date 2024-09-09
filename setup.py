@@ -1,5 +1,5 @@
 import os
-from distutils.core import setup
+from distutils.core import setup, find_packages
 
 try:
     readme = open(os.path.join(os.path.dirname(__file__), 'README.md'), 'r').read()
@@ -37,6 +37,7 @@ setup(
     author='dos257',
     author_email='149811921+dos257@users.noreply.github.com',
     url='https://github.com/dos257/scROCK',
+    packages=find_packages(),
     py_modules=['scrock'],
     license='MIT',
     install_requires=install_requires,
