@@ -1,5 +1,5 @@
 import os
-from distutils.core import setup, find_packages
+from setuptools import setup, find_packages
 
 try:
     readme = open(os.path.join(os.path.dirname(__file__), 'README.md'), 'r').read()
