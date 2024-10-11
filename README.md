@@ -1,6 +1,5 @@
+<img src="scROCK_Logo.png" alt="drawing" width="50"/>
 
-  
- ![scRock_Logo](scROCK_Logo.png)
   
 
 
