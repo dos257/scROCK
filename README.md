@@ -1,4 +1,4 @@
-<img src="scROCK_Logo.png" alt="drawing" width="50"/>
+<img src="scROCK_Logo.png" alt="drawing" width="200"/>
 
   
 
