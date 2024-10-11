@@ -2,6 +2,13 @@
 
 scROCK (single-cell Refinement Of Cluster Knitting) is an algorithm for correcting cluster labels for scRNA-seq data, based on [Xinchuan Zeng and Tony R. Martinez. 2001. An algorithm for correcting mislabeled data. Intell. Data Anal. 5, 6 (December 2001), 491–502.](https://dl.acm.org/doi/10.5555/1294000.1294004).
 
+## How it works
+scROCK uses a weakly supervised machine learning algorithm called ADE. It is based on ability of neural networks to remember first simple and correct class labels and then incorrect ones. During the training of a small neural network, scROCK maintains smoothed class probabilities for every sample, and changes dataset labels according to them.
+
+![scROCK scheme](scrock_scheme.png)
+
+Final class labels after a fixed number of epochs or batches are considered as "fixed" and returned by `scrock` call.
+
 
 ## Installation
 
@@ -63,15 +70,6 @@ torch.set_num_threads(1)
 ```
 
 Torch imperfect CPU parallelization spends most of the time in thread synchronization and slows down the whole process.
-
-
-
-## How it works
-scROCK uses a weakly supervised machine learning algorithm called ADE. It is based on ability of neural networks to remember first simple and correct class labels and then incorrect ones. During the training of a small neural network, scROCK maintains smoothed class probabilities for every sample, and changes dataset labels according to them.
-
-![scROCK scheme](scrock_scheme.png)
-
-Final class labels after a fixed number of epochs or batches are considered as "fixed" and returned by `scrock` call.
 
 
 
