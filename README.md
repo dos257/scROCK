@@ -1,8 +1,8 @@
-<div style="width: 10%; height: 10%">
+
   
- ![scRock_Logo](scROCK_Logo.png)
+ ![scRock_Logo]("scROCK_Logo.png" width="400" height="790")
   
-</div>
+
 
 # scROCK
 
