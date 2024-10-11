@@ -1,6 +1,6 @@
 
   
- ![scRock_Logo](scROCK_Logo.png)
+ ![scRock_Logo](scROCK_Logo.png){: width="50%"}
   
 
 
