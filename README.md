@@ -1,3 +1,5 @@
+## scROCK (<ins>s</ins>ingle-<ins>c</ins>ell <ins>R</ins>efinement <ins>O</ins>f <ins>C</ins>luster <ins>K</ins>nitting)
+
 <p align="center">
   <img src="scROCK_Logo.png" alt="drawing" width="250"/>
 </p>
