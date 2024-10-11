@@ -1,4 +1,4 @@
-![scRock_Logo](scROCK_Logo.png){:height="36px" width="36px"}
+![scRock_Logo](scROCK_Logo.png){:height="6px" width="6px"}.
 
 # scROCK
 
