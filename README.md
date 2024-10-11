@@ -1,4 +1,4 @@
-![scROCK_Logo](scRock_Logo.png)
+![scRock_Logo](scROCK_Logo.png)
 
 # scROCK
 
