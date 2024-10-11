@@ -1,4 +1,4 @@
-<div style="width: 50%; height: 50%">
+<div style="width: 10%; height: 10%">
   
  ![scRock_Logo](scROCK_Logo.png)
   
