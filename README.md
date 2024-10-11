@@ -1,6 +1,6 @@
 
   
- ![scRock_Logo]("scROCK_Logo.png" width="400" height="790")
+ ![scRock_Logo](scROCK_Logo.png)
   
 
 
