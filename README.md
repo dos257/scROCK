@@ -1,4 +1,8 @@
-![scRock_Logo](scROCK_Logo.png){:height="6px" width="6px"}.
+<div style="width: 50%; height: 50%">
+  
+ ![scRock_Logo](scROCK_Logo.png)
+  
+</div>
 
 # scROCK
 
