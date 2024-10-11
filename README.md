@@ -1,6 +1,6 @@
 # scROCK
 
-scROCK (single-cell Refinement Of Cluster Knitting) is an algorithm for correcting cluster labels for scRNA-seq data, based on [Xinchuan Zeng and Tony R. Martinez. 2001. An algorithm for correcting mislabeled data. Intell. Data Anal. 5, 6 (December 2001), 491–502.](https://dl.acm.org/doi/10.5555/1294000.1294004).
+scROCK (<ins>s</ins>ingle-<ins>c</ins>ell <ins>R</ins>efinement <ins>O</ins>f <ins>C</ins>luster <ins>K</ins>nitting) is an algorithm for correcting cluster labels for scRNA-seq data, based on [Xinchuan Zeng and Tony R. Martinez. 2001. An algorithm for correcting mislabeled data. Intell. Data Anal. 5, 6 (December 2001), 491–502.](https://dl.acm.org/doi/10.5555/1294000.1294004).
 
 ## How it works
 scROCK uses a weakly supervised machine learning algorithm called ADE. It is based on ability of neural networks to remember first simple and correct class labels and then incorrect ones. During the training of a small neural network, scROCK maintains smoothed class probabilities for every sample, and changes dataset labels according to them.
