@@ -1,6 +1,6 @@
-<img src="scROCK_Logo.png" alt="drawing" width="200"/>
-
-  
+<p align="center">
+  <img src="scROCK_Logo.png" alt="drawing" width="250"/>
+</p>
 
 
 # scROCK
