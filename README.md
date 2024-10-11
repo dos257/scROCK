@@ -4,7 +4,7 @@
   <img src="scROCK_Logo.png" alt="drawing" width="250"/>
 </p>
 
-scROCK is an algorithm for correcting cluster labels for scRNA-seq data, based on [Xinchuan Zeng and Tony R. Martinez. 2001. An algorithm for correcting mislabeled data. Intell. Data Anal. 5, 6 (December 2001), 491–502.](https://dl.acm.org/doi/10.5555/1294000.1294004).
+scROCK is a deep-learning based algorithm for correcting cluster labels for scRNA-seq data, based on [Xinchuan Zeng and Tony R. Martinez. 2001. An algorithm for correcting mislabeled data. Intell. Data Anal. 5, 6 (December 2001), 491–502.](https://dl.acm.org/doi/10.5555/1294000.1294004).
 
 ## How scROCK works
 scROCK uses a supervised machine learning algorithm called ADE (automatic data enhancement). It is based on ability of neural networks to remember first simple and correct class labels and then incorrect ones. During the training of a small neural network, scROCK maintains smoothed class probabilities for every sample, and changes dataset labels according to them.
